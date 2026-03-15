@@ -10,48 +10,79 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.Map;
-import java.io.InputStream;        
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class HttpServer {
     static Map<String, WebMethod> endPoints = new HashMap<>();
     static String staticFilesPath = "";
-    public static void main(String[] args) throws IOException, URISyntaxException {
-        ServerSocket serverSocket = null;
+
+    private static volatile boolean running = true;
+    private static ServerSocket serverSocket;
+    private static final ExecutorService threadPool = Executors.newFixedThreadPool(10);
+
+    public static void main(String[] args) throws IOException {
         try {
             serverSocket = new ServerSocket(8080);
         } catch (IOException e) {
             System.err.println("Could not listen on port: 8080.");
             System.exit(1);
         }
-        Socket clientSocket = null;
-        boolean running = true;
+
+        // Graceful shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("\nShutting down server gracefully...");
+            running = false;
+            try {
+                serverSocket.close();
+            } catch (IOException ignored) {}
+            threadPool.shutdown();
+            try {
+                if (!threadPool.awaitTermination(30, TimeUnit.SECONDS)) {
+                    threadPool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                threadPool.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            System.out.println("Server stopped.");
+        }));
+
+        System.out.println("Server started on port 8080. Press Ctrl+C to stop.");
         while (running) {
             try {
                 System.out.println("Listo para recibir ...");
-                clientSocket = serverSocket.accept();
+                Socket clientSocket = serverSocket.accept();
+                threadPool.submit(() -> handleClient(clientSocket));
             } catch (IOException e) {
-                System.err.println("Accept failed.");
-                System.exit(1);
+                if (running) {
+                    System.err.println("Accept failed: " + e.getMessage());
+                }
+                // If running is false, the socket was closed intentionally — exit loop
             }
+        }
+    }
 
+    private static void handleClient(Socket clientSocket) {
+        try {
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(
-                    new InputStreamReader(
-                            clientSocket.getInputStream()
-                    ));
+                    new InputStreamReader(clientSocket.getInputStream()));
+
             String inputLine;
             String outputLine;
             boolean firstline = true;
             String reqPath = "";
             Map<String, String> reqParams = new HashMap<>();
+
             while ((inputLine = in.readLine()) != null) {
                 System.out.println("Received: " + inputLine);
                 if (firstline) {
                     String[] firstLineTokens = inputLine.split(" ");
-                    String method = firstLineTokens[0];
                     String srturi = firstLineTokens[1];
-                    String protocol = firstLineTokens[2];
                     URI requri = new URI(srturi);
                     reqPath = requri.getPath();
 
@@ -66,11 +97,10 @@ public class HttpServer {
                     break;
                 }
             }
-            
 
             HttpRequest req = new HttpRequest(reqParams);
             HttpResponse res = new HttpResponse();
-            
+
             WebMethod wm = endPoints.get(reqPath);
             if (wm != null) {
                 outputLine = "HTTP/1.1 200 OK\n\r"
@@ -87,41 +117,39 @@ public class HttpServer {
                         + "</body>"
                         + "</html>";
                 out.println(outputLine);
-
             } else {
                 String fileContent = readStaticFile(reqPath);
-                if(fileContent != null){
+                if (fileContent != null) {
                     String contentType = getContentType(reqPath);
                     outputLine = "HTTP/1.1 200 OK\n\r"
                             + "Content-Type:" + contentType + "\n\r"
                             + "\n\r"
                             + fileContent;
                     out.println(outputLine);
-
-                }else{
-
-                outputLine = "HTTP/1.1 404 Not Found\n\r"
-                        + "Content-Type:text/html\n\r"
-                        + "\n\r"
-                        + "<!DOCTYPE html>"
-                        + "<html>"
-                        + "<head>"
-                        + "<meta charset=\"UTF-8\">"
-                        + "<title>404 Not Found</title>\n"
-                        + "</head>"
-                        + "<body>"
-                        + "<h1>404 Not Found</h1>"
-                        + "The requested resource was not found on this server."
-                        + "</body>"
-                        + "</html>";
-                out.println(outputLine);
+                } else {
+                    outputLine = "HTTP/1.1 404 Not Found\n\r"
+                            + "Content-Type:text/html\n\r"
+                            + "\n\r"
+                            + "<!DOCTYPE html>"
+                            + "<html>"
+                            + "<head>"
+                            + "<meta charset=\"UTF-8\">"
+                            + "<title>404 Not Found</title>\n"
+                            + "</head>"
+                            + "<body>"
+                            + "<h1>404 Not Found</h1>"
+                            + "The requested resource was not found on this server."
+                            + "</body>"
+                            + "</html>";
+                    out.println(outputLine);
                 }
             }
             out.close();
             in.close();
             clientSocket.close();
+        } catch (IOException | URISyntaxException e) {
+            System.err.println("Error handling client: " + e.getMessage());
         }
-        serverSocket.close();
     }
 
     public static void get(String path, WebMethod wm){
