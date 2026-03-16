@@ -2,14 +2,17 @@
 
 ## Project Description
 
-This project implements a **custom HTTP web server** in Java (Apache) with **Inversion of Control (IoC)** capabilities similar to Spring Boot. The server is capable of:
+This project implements a **custom HTTP web server** in Java (without using Spring) with **Inversion of Control (IoC)** capabilities similar to Spring Boot. The current version focuses on three major goals:
 
-- Serving HTML pages and PNG images
+- Concurrent HTTP request handling
+- Graceful server shutdown
+- Containerized deployment with Docker (local and AWS EC2)
+
+The framework also keeps support for:
+
 - Building web applications from POJOs (Plain Old Java Objects)
 - Automatically scanning components with annotations
-- Handling non-concurrent HTTP requests
 - Supporting custom annotations: `@RestController`, `@GetMapping`, `@RequestParam`
-
 
 ---
 
@@ -21,6 +24,8 @@ This project implements a **custom HTTP web server** in Java (Apache) with **Inv
    - Handles HTTP GET requests
    - Routes requests to corresponding controllers
    - Serves static files from `/webroot`
+   - Uses a thread pool to process requests concurrently
+   - Registers a JVM shutdown hook for graceful termination
 
 2. **ComponentScanner**: Automatic classpath scanning
    - Searches for classes annotated with `@RestController`
@@ -41,48 +46,99 @@ This project implements a **custom HTTP web server** in Java (Apache) with **Inv
 
 ## Implemented Features
 
-### 1. Functional HTTP Server
+### 1. Concurrent Request Handling
 
-The server starts and listens on port 8080:  
+The server now handles multiple client requests at the same time by delegating each accepted socket to an `ExecutorService` thread pool.
 
-![Running MicroSpringBoot](assets/1-RunningNewMicroSpringBoot.png)
+This avoids the old sequential behavior where one slow request could block the next incoming requests.
 
-### 2. Index Page with Available Endpoints
+### 2. Graceful Shutdown
 
-The server serves a static HTML page listing all endpoints:  
+The framework now supports graceful shutdown using a JVM shutdown hook:
 
-![Index Page](assets/2-IndexWithAllTheEndpoints.png)
+- Stops the accept loop
+- Closes the server socket
+- Stops receiving new tasks in the thread pool
+- Waits for in-flight requests to finish
+- Forces shutdown only if timeout is exceeded
 
-### 3. Endpoints with Annotations
+This behavior is triggered on controlled JVM termination events (for example, `Ctrl + C` or `System.exit()`).
 
-#### Main Endpoint "/"  
-![Greetings Endpoint](assets/3-FirstEndpointGreetings.png)
+![alt text](assets/shutdown.png)
 
-#### Endpoint "/pi"
-Returns the value of PI using reflection:  
-![PI Endpoint](assets/4-PIEndpoint.png) 
+### 3. Docker Local Workflow
 
-#### Endpoint "/euler"
-Returns Euler's number:  
-![Euler Endpoint](assets/5-EulerEndpoint.png)
+#### Step 1: Create Dockerfile
+![Create Dockerfile](assets/1-CreamosDockerFile.png)
 
-#### Endpoint "/hello"
-Simple greeting without parameters:  
-![Hello Endpoint](assets/6-HelloEndpoint.png)
+#### Step 2: Build image
+```bash
+docker build --tag microspringbootimage .
+```
+![Build image](assets/2-CreamosLaImagen.png)
+![Image verification](assets/3-VerificacionDeImagenCreada.png)
 
-### 4. @RequestParam Support
+#### Step 3: Run container
+```bash
+docker run -d -p 34000:8080 --name primercontenedordemicrospringboot microspringbootimage
+```
+![Run container](assets/4-CreamosContenedorUsandoLaImagenCreada.png)
+![Container verification](assets/5-VerificamosContenedorCreado.png)
 
-Greeting with default value  
-![Greeting Default](assets/7-GreetingDefaultEndpoint.png)
+#### Step 4: Validate locally
+Open:
+```text
+http://localhost:34000/
+```
+![Local container test](assets/6-ComprobamosFuncionalidadEnLocalEnElContenedor.png)
 
-#### Greeting with custom parameter
-The framework automatically injects the `name` parameter:  
-![Greeting with Parameter](assets/8-GreetingWithParameterEndpoint.png)
+### 4. Docker Hub Publication
 
-### 5. Automatic Controller Scanning
+#### Step 1: Create Docker Hub repository
+![Create Docker Hub repository](assets/7-CreamosElRepositorioEnDockerHub.png)
 
-The framework automatically finds and registers new controllers:  
-![New Controller Test](assets/9-NewControllerTest.png)
+#### Step 2: Tag local image
+```bash
+docker tag microspringbootimage <dockerhub-user>/microspringboot:latest
+```
+![Tag image](assets/8-HacemosReferenciaDelRepositorioConLaImagen.png)
+
+#### Step 3: Push image
+```bash
+docker push <dockerhub-user>/microspringboot:latest
+```
+![Push image](assets/9-SubimosLaImagenAlRepositorio.png)
+![Remote verification](assets/10-VerificamosQueSiSeSubioLaImagen.png)
+
+### 5. AWS EC2 Deployment with Docker
+
+#### Step 1: Connect to EC2 instance
+```bash
+ssh -i your-key.pem ec2-user@your-instance-ip
+```
+![Access EC2](assets/11-AccedemosALaInstanciaEC2.png)
+
+#### Step 2: Install Docker in EC2
+![Install Docker](assets/12-InstalamosDockerEnLaInstancia.png)
+
+#### Step 3: Pull image and run container
+```bash
+docker pull <dockerhub-user>/microspringboot:latest
+docker run -d -p 42000:8080 --name microspringboot-aws <dockerhub-user>/microspringboot:latest
+```
+![Run container from Docker Hub](assets/13-CreamosElContenedorPulleandoLaImagenDelRepositorio.png)
+
+#### Step 4: Open EC2 inbound port
+Allow inbound traffic on port `42000` in the Security Group.
+![Open inbound port](assets/14-PermitimosElAccesoPorElPuerto42000.png)
+
+#### Step 5: Validate from browser
+Open:
+```text
+http://your-ec2-public-ip:42000/
+```
+![Browser access in EC2](assets/15-ConfirmamosElAccesoPorNavegadorAlcontenedorDentroDeLaInstancia.png)
+![Index verification](assets/16-ConfirmamosUsoDelIndexhtml.png)
 
 ---
 
@@ -97,8 +153,8 @@ The framework automatically finds and registers new controllers:
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/DASarria/NewSpringBoot.git
-cd NewSpringBoot
+git clone https://github.com/DASarria/Concurrent-MicroSpringBoot.git
+cd Concurrent-MicroSpringBoot
 ```
 
 ### Step 2: Compile the Project
@@ -117,7 +173,7 @@ java -cp target/classes edu.co.escuelaing.arep.WebFramework
 
 Open your browser and visit:
 
-```
+```text
 http://localhost:8080/
 ```
 
@@ -134,80 +190,19 @@ http://localhost:8080/
 
 ---
 
-## ☁️ AWS EC2 Deployment
-
-### Step 1: Create EC2 Instance
-
-Create an EC2 instance on AWS with the following characteristics:
-
-![EC2 Instance Configuration](assets/10-EC2MicroSpringBootInstancesToDeployAWS.png)
-
-- **Type**: t2.micro (Free Tier)
-- **Operating System**: Amazon Linux or Ubuntu
-- **Security Group**: Allow traffic on port 8080
-
-### Step 2: Connect to the Instance
-
-```bash
-ssh -i your-key.pem ec2-user@your-instance-ip
-```
-
-![Connection to Instance](assets/11-ConectionWithTheInstance.png)
-
-### Step 3: Install Java 21
-
-```bash
-sudo yum install java-21-amazon-corretto-devel
-```
-
-### Step 4: Upload Compiled Files
-
-From your local machine:
-
-```bash
-sftp -i your-key.pem ec2-user@your-instance-ip
-```
-
-![Upload Classes](assets/12-WeUploadTheCompileClassesToExecuteTheMicroSpringBoot.png)
-
-### Step 5: Run the Framework on EC2
-
-```bash
-cd classes
-java -cp edu.co.escuelaing.arep.WebFramework
-```
-
-![Execution in EC2](assets/13-ExecutionOfTheWebFrameworkWithMicroSpringBoot.png)
-
-### Step 6: Verify Endpoints on AWS
-
-Access from your browser using your EC2 instance's public IP:
-
-```
-http://your-ec2-public-ip:8080/
-```
-
-![Endpoints in AWS](assets/14-SameEndpointsReadyToUseWithDeployInAWSEC2Instance.png)
-
-### Production Usage Examples
-
-![Example 1](assets/15-example.png)
-![Example 2](assets/16-example.png)
-
----
-
 ## Project Structure
 
-```
-NewSpringBoot/
+```text
+Concurrent-MicroSpringBoot/
 ├── src/
 │   ├── main/
 │   │   ├── java/
 │   │   │   └── edu/co/escuelaing/arep/
 │   │   │       ├── WebFramework.java                 # Entry point
 │   │   │       ├── ComponentScanner.java             # Automatic scanning
+│   │   │       ├── MicroSpringBoot.java              # Reflection-based launcher
 │   │   │       ├── HTTPComponents/
-│   │   │       │   ├── HttpServer.java               # HTTP server
+│   │   │       │   ├── HttpServer.java               # Concurrent HTTP server + graceful shutdown
 │   │   │       │   ├── HttpRequest.java              # Request wrapper
 │   │   │       │   ├── HttpResponse.java             # Response wrapper
 │   │   │       │   └── WebMethod.java                # Functional interface
@@ -217,7 +212,8 @@ NewSpringBoot/
 │   │   │       │   └── RequestParam.java             # Parameter annotation
 │   │   │       └── controllers/
 │   │   │           ├── HelloController.java          # Example controller
-│   │   │           └── GreetingController.java       # Controller with params
+│   │   │           ├── GreetingController.java       # Controller with params
+│   │   │           └── NewController.java            # Additional controller example
 │   │   └── resources/
 │   │       └── webroot/
 │   │           └── index.html                        # Static page
@@ -226,51 +222,10 @@ NewSpringBoot/
 │           └── edu/co/escuelaing/arep/
 │               └── AppTest.java
 ├── assets/                                           # README images
+├── Dockerfile                                        # Container image definition
 ├── pom.xml                                           # Maven configuration
 └── README.md
 ```
-
----
-
-## How to Create a New Controller
-
-### 1. Create the class with annotations:
-
-```java
-package edu.co.escuelaing.arep.controllers;
-
-import edu.co.escuelaing.arep.annotations.RestController;
-import edu.co.escuelaing.arep.annotations.GetMapping;
-import edu.co.escuelaing.arep.annotations.RequestParam;
-
-@RestController
-public class UserController {
-
-    @GetMapping("/users")
-    public static String getUsers() {
-        return "List of all users";
-    }
-
-    @GetMapping("/user")
-    public static String getUser(@RequestParam(value = "id", defaultValue = "1") String id) {
-        return "User with ID: " + id;
-    }
-}
-```
-
-### 2. Recompile:
-
-```bash
-mvn compile
-```
-
-### 3. Restart the server:
-
-```bash
-java -cp target/classes edu.co.escuelaing.arep.WebFramework
-```
-
-ComponentScanner will **automatically** detect and register your new controller. No configuration changes needed.
 
 ---
 
@@ -280,19 +235,24 @@ ComponentScanner will **automatically** detect and register your new controller.
 
 The framework implements IoC through:
 
-- **Automatic classpath scanning**: 
-   - Recursively searches all classes in `edu.co.escuelaing.arep`
-   - Filters only classes with `@RestController`
+- **Automatic classpath scanning**:
+  - Recursively searches all classes in `edu.co.escuelaing.arep`
+  - Filters only classes with `@RestController`
 
 - **Dependency injection**:
-   - Uses reflection to extract methods with `@GetMapping`
-   - Processes parameters with `@RequestParam`
-   - Injects values from HTTP query parameters
+  - Uses reflection to extract methods with `@GetMapping`
+  - Processes parameters with `@RequestParam`
+  - Injects values from HTTP query parameters
 
+### Concurrency and Graceful Termination
+
+- Fixed-size thread pool for request concurrency
+- Controlled shutdown flow through JVM shutdown hook
+- Proper release of socket and executor resources
 
 ---
 
 ##  Author
 
-**David Sarria - March 2026** 
+**David Sarria - March 2026**
 
